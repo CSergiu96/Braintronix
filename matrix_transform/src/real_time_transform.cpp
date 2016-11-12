@@ -1,36 +1,39 @@
-#include <vector>
-#include <Eigen/Core>
-#include "pcl/point_types.h"
-#include "pcl/point_cloud.h"
-#include "pcl/io/pcd_io.h"
-#include "pcl/kdtree/kdtree_flann.h"
-#include "pcl/features/normal_3d.h"
-#include "pcl/features/pfh.h"
-#include "pcl/keypoints/sift_keypoint.h"
-#include <pcl/registration/transforms.h>
-#include <pcl/visualization/pcl_visualizer.h>
-#include <pcl/filters/passthrough.h>
+#include <ros/ros.h>
+// PCL specific includes
+#include <sensor_msgs/PointCloud2.h>
+#include <pcl_conversions/pcl_conversions.h>
+#include <pcl/point_cloud.h>
+#include <pcl/point_types.h>
+#include <pcl/filters/voxel_grid.h>
+#include <pcl/PCLPointCloud2.h>
+#include <pcl/conversions.h>
+#include <pcl_ros/transforms.h>
+
 #include <iostream>
+
+#include <pcl/point_cloud.h>
 #include <pcl/console/parse.h>
-#include <pcl/filters/extract_indices.h>
+#include <pcl/common/transforms.h>
+#include <pcl/visualization/pcl_visualizer.h>
+
 #include <pcl/sample_consensus/ransac.h>
 #include <pcl/sample_consensus/sac_model_plane.h>
 #include <pcl/sample_consensus/sac_model_sphere.h>
 #include <pcl/sample_consensus/sac_model_cylinder.h>
-#include <boost/thread/thread.hpp>
+#include <pcl/filters/extract_indices.h>
 #include <pcl/segmentation/sac_segmentation.h>
-#include <pcl/range_image/range_image.h>
-#include <pcl/visualization/range_image_visualizer.h>
-#include <pcl/features/range_image_border_extractor.h>
 #include <pcl/ModelCoefficients.h>
 #include <pcl/sample_consensus/method_types.h>
 #include <pcl/sample_consensus/model_types.h>
+#include <pcl/filters/passthrough.h>
+#include "pcl/io/pcd_io.h"
+#include "pcl/kdtree/kdtree_flann.h"
+#include "pcl/features/normal_3d.h"
+
+ros::Publisher pub;
 
 using namespace pcl;
 using namespace std;
-
-typedef PointXYZRGB PointType;
-typedef pcl::PointXYZ PointTypexyz;
 
 //convert RGB in HSV to determine colors
 typedef struct {
@@ -49,6 +52,7 @@ typedef struct {
 //------------------------------
 //----Global variables----------
 //------------------------------
+typedef PointXYZRGB PointType;
 
 PointCloud<PointType>::Ptr cloud_object(new PointCloud<PointType>);
 PointCloud<PointType>::Ptr cloud_filtered(new PointCloud<PointType>);
@@ -71,21 +75,6 @@ pcl::PointCloud<PointType>::Ptr cloud_outliers(new PointCloud<PointType>());
 
 pcl::PointIndices::Ptr inliers_pi(new pcl::PointIndices);
 
-boost::shared_ptr<pcl::visualization::PCLVisualizer> simpleVis(
-        pcl::PointCloud<PointType>::ConstPtr cloud) {
-    // -----Open 3D viewer and add point cloud-----
-    boost::shared_ptr<pcl::visualization::PCLVisualizer> viewer(
-            new pcl::visualization::PCLVisualizer("3D Viewer"));
-    viewer->setBackgroundColor(0, 0, 0);
-    pcl::visualization::PointCloudColorHandlerRGBField<PointType> handler(
-            cloud);
-    viewer->addPointCloud<PointType>(cloud, handler, "sample cloud");
-    viewer->setPointCloudRenderingProperties(
-            pcl::visualization::PCL_VISUALIZER_POINT_SIZE, 3, "sample cloud");
-    //viewer->addCoordinateSystem (1.0, "global");
-    viewer->initCameraParameters();
-    return (viewer);
-}
 
 hsv rgb2hsv(rgb in)
 {
@@ -182,7 +171,7 @@ void planDetection() {
     ransac.getModelCoefficients(coefficientsInliers);
     ransac.getInliers(inliers_plan);
 
-    cout << "Plan detected" << '\n';
+    cout << "Plan detected" << std::endl;
 
 }
 
@@ -195,7 +184,8 @@ void sphereDetection() {
     model_s->setRadiusLimits(0.0, 0.3);
     ransac.computeModel();
     ransac.getInliers(inliers_sphere);
-    cout << "Sphere detected" << '\n';
+    cout << "Sphere detected" << std::endl;
+
 }
 
 void cylinderDetection() {
@@ -231,7 +221,7 @@ void cylinderDetection() {
     // Obtain the cylinder inliers and coefficients
     seg.segment(*inliers_cylinder, *coefficients);
 
-    cout << "Cylinder detected" << '\n';
+    cout << "Cylinder detected" << std::endl;
 }
 
 void objectsDetection(vector<int> inliers) {
@@ -277,14 +267,14 @@ bool planSegmentation() {
             << coefficientsOutliers->values[0] << " "
             << coefficientsOutliers->values[1] << " "
             << coefficientsOutliers->values[2] << " "
-            << coefficientsOutliers->values[3] << '\n';
+            << coefficientsOutliers->values[3] << std::endl;
 
     std::cerr << "Model INLIERS coefficients: " << coefficientsInliers[0] << " "
             << coefficientsInliers[1] << " " << coefficientsInliers[2] << " "
             << coefficientsInliers[3] << '\n';
 
-    std::cerr << "Model ouliers: " << outliersSegm->indices.size() << '\n';
-    std::cerr << "Model inliers: " << inliers_pi->indices.size() << '\n';
+    std::cerr << "Model ouliers: " << outliersSegm->indices.size() << std::endl;
+    std::cerr << "Model inliers: " << inliers_pi->indices.size() << std::endl;
 
     copyPointCloud(*cloud_segmented, outliersSegm->indices, *cloud_final);
     //compute scalar product of two normals (outliers and inliers) to determine if are perpendicular
@@ -297,91 +287,63 @@ bool planSegmentation() {
                     < (0.1))
 
                     {
-        cout << "Object detected" << '\n';
+        cout << "Object detected" << std::endl;
         return true;
     }
     return false;
 }
 
-int main(int argc, char** argv) {
+typedef PointXYZRGB PointType;
 
-    cout<<argv[1]<<'\n';
-
-    if (argc < 2) {
-        PCL_ERROR("No input file!");
-        return -1;
-    }
-    if (io::loadPCDFile<PointType>(argv[1], *cloud_object) == -1) //* load the file
-            {
-        PCL_ERROR("Couldn't read file %s \n", argv[1]);
-        return (-1);
-    }
-
-    objectFilter(); //passthrough filter
-
-
-    colorDetection();
-
-    /*if (pcl::console::find_argument(argc, argv, "-f") >= 0) {
-        planDetection();
-    } else if (pcl::console::find_argument(argc, argv, "-sf") >= 0) {
-        sphereDetection();
-    } else if (pcl::console::find_argument(argc, argv, "-cyl") >= 0) {
-        cylinderDetection();
-    }*/
-
-    const double ratio = 40.0 / 100;
-    sphereDetection();
-    if (inliers_sphere.size() >= cloud_filtered->points.size() * ratio) {
-        //sfera
-        cout << "sfera";
-    } else {
-        cylinderDetection();
-        cout << inliers_cylinder->indices.size() << ' ' << cloud_filtered->points.size() << '\n';
-        if (inliers_cylinder->indices.size() >= cloud_filtered->points.size() * ratio) {
-            //cilindru
-            cout << "cilindru";
-        } else {
-            planDetection();
-            if (inliers_plan.size() >= cloud_filtered->points.size() * ratio) {
-                //plan
-                cout << "plan";
-            } else {
-                //object (box)
-                getOutliers(inliers_plan);
-                if (planSegmentation()) {
-                    cout << "obiect";
-                } else {
-                    cout << "necunoscut";
-                }
-            }
-        }
-    }
-
-    //objectsDetection();
-
-    // creates the visualization object and adds either our orignial cloud or all of the inliers
-    // depending on the command line arguments specified.
-    /*
-    boost::shared_ptr<pcl::visualization::PCLVisualizer> viewer;
-    viewer = simpleVis(cloud_outliers);
-    while (!viewer->wasStopped()) {
-        viewer->spinOnce(100);
-        boost::this_thread::sleep(boost::posix_time::microseconds(100000));
-    }
-    if (pcl::console::find_argument(argc, argv, "-f") >= 0
-            || pcl::console::find_argument(argc, argv, "-sf") >= 0
-            || pcl::console::find_argument(argc, argv, "-cyl") >= 0)
-        viewer = simpleVis(cloud_ransac);
-    else
-        viewer = simpleVis(cloud_filtered);
-    while (!viewer->wasStopped()) {
-        viewer->spinOnce(100);
-        boost::this_thread::sleep(boost::posix_time::microseconds(100000));
-    }
-
-    planSegmentation();
-    */
-
-    return (0);
+boost::shared_ptr<pcl::visualization::PCLVisualizer> simpleVis(
+        pcl::PointCloud<PointType>::ConstPtr cloud) {
+    // -----Open 3D viewer and add point cloud-----
+    boost::shared_ptr<pcl::visualization::PCLVisualizer> viewer(
+            new pcl::visualization::PCLVisualizer("3D Viewer"));
+    viewer->setBackgroundColor(0, 0, 0);
+    pcl::visualization::PointCloudColorHandlerRGBField<PointType> handler(
+            cloud);
+    viewer->addPointCloud<PointType>(cloud, handler, "sample cloud");
+    viewer->setPointCloudRenderingProperties(
+            pcl::visualization::PCL_VISUALIZER_POINT_SIZE, 3, "sample cloud");
+    //viewer->addCoordinateSystem (1.0, "global");
+    viewer->initCameraParameters();
+    return (viewer);
 }
+
+void cloud_cb(
+        const boost::shared_ptr<const sensor_msgs::PointCloud2>& cloud_msg) {
+    /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+    // Container for original & filtered data
+    pcl::PCLPointCloud2 cloud; // = new pcl::PCLPointCloud2;
+    //pcl::PCLPointCloud2ConstPtr cloudPtr(cloud);
+    //pcl::PCLPointCloud2 cloud_filtered;
+    pcl::PointCloud<PointType>::Ptr cloud_pcl(new pcl::PointCloud<PointType>);
+    pcl::PointCloud<PointType>::Ptr cloud_filtered(
+            new pcl::PointCloud<PointType>());
+    /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+    /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+    // Convert to PCL data type
+    pcl_conversions::toPCL(*cloud_msg, cloud); //first from sensor msgs pointcloud2 to pcl pointcloud2
+    pcl::fromPCLPointCloud2(cloud, *cloud_pcl); //from pcl pointcloud2 to pcl pointxyz in order to make to computations below
+    /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+}
+
+int main(int argc, char** argv) {
+    // Initialize ROS
+    ros::init(argc, argv, "real_time_transform");
+    ros::NodeHandle nh;
+
+    // Create a ROS subscriber for the input point cloud
+    ros::Subscriber sub = nh.subscribe("/camera/depth_registered/points", 1,
+            cloud_cb);
+
+    // Create a ROS publisher for the output point cloud
+    pub = nh.advertise<sensor_msgs::PointCloud2>("output", 1);
+
+    // Spin
+    ros::spin();
+}
+
