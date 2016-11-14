@@ -52,20 +52,39 @@ typedef struct {
 
 //------------------------------
 //----Global variables----------
+//----This is a new architectural pattern, called make everything global
 //------------------------------
 typedef PointXYZRGB PointType;
 
+// The initial point cloud (directly from camera)
 PointCloud<PointType>::Ptr cloud(new PointCloud<PointType>);
-PointCloud<PointType>::Ptr cloud_object(new PointCloud<PointType>);
-PointCloud<PointType>::Ptr cloud_filtered(new PointCloud<PointType>); //passthrough filter
-PointCloud<PointType>::Ptr cloud_filtered2(new PointCloud<PointType>); //voxelgrid filter
-pcl::PointCloud<PointType>::Ptr cloud_ransac(new PointCloud<PointType>);
-pcl::PointCloud<PointXYZ>::Ptr cloud_final(new PointCloud<PointXYZ>());
+
+// Cloud after passthrough filter (remove too far away objects)
+PointCloud<PointType>::Ptr cloud_filtered(new PointCloud<PointType>);
+
+// Cloud after voxelgrid downsampling
+PointCloud<PointType>::Ptr cloud_filtered2(new PointCloud<PointType>);
+
+// Cloud after ground removal
 PointCloud<PointType>::Ptr cloud_without_ground(new PointCloud<PointType>);
 
+// The current cluster (the object that is going to be detected)
+PointCloud<PointType>::Ptr cloud_object(new PointCloud<PointType>);
+
+// TODO !Deprecated: cloud after ransac filtering (the inliers)
+pcl::PointCloud<PointType>::Ptr cloud_ransac(new PointCloud<PointType>);
+
+// TODO !Deprecated: cloud after ransac filtering x 2 (in case of 2-plane box)
+pcl::PointCloud<PointXYZ>::Ptr cloud_final(new PointCloud<PointXYZ>());
+
 //plan segmentation - get a,b,c,d (ax + by +cz + d = 0 )
+// For 2x plane segmentation (in case of boxes), the OUTLIERS of the first plane detection
 pcl::PointCloud<pcl::PointXYZ>::Ptr cloud_segmented(
         new pcl::PointCloud<pcl::PointXYZ>);
+
+
+pcl::PointCloud<PointType>::Ptr cloud_outliers(new PointCloud<PointType>());
+
 Eigen::VectorXf coefficientsInliers;
 
 //RANSAC algorithm
@@ -75,8 +94,6 @@ std::vector<int> inliers_plan;
 pcl::PointIndices::Ptr inliers_cylinder(new pcl::PointIndices);
 
 Eigen::VectorXf ground_coefficients;
-
-pcl::PointCloud<PointType>::Ptr cloud_outliers(new PointCloud<PointType>());
 
 pcl::PointIndices::Ptr inliers_pi(new pcl::PointIndices);
 
@@ -105,6 +122,11 @@ ObjectFilter command;
 bool commandReceived = false;
 bool shouldDetect = true;
 
+// Find the difference in hue
+// Since hue is an angle (0-360 degrees),
+// 1 degree is close to 359 degrees, even
+// though the numbers are far away. So
+// we can't do a simple difference
 double hDist(double h1, double h2) {
     double minH = (h1 < h2 ? h1 : h2);
     double maxH = (h1 >= h2 ? h1 : h2);
@@ -114,6 +136,7 @@ double hDist(double h1, double h2) {
     return (d1 < d2 ? d1 : d2);
 }
 
+// "Classification" of color based on HSV
 string getColor(hsv color) {
     if (color.s < 0.1 || color.v < 0.1) {
         if (color.v > 0.5) {
@@ -136,6 +159,10 @@ string getColor(hsv color) {
     return "blue";
 }
 
+// Convert RGB to HSV
+// R, G, B are between 0 and 1 (double)
+// H is between 0 and 360 (double, degrees)
+// S, V are between 0 and 1 (double)
 hsv rgb2hsv(rgb in) {
     hsv out;
     double min, max, delta;
@@ -190,6 +217,8 @@ void passthroughFilter() //passthrough filter
 }
 
 // input: cloud_object
+// Computes the average RGB values for the object
+// Converts that average to HSV
 hsv colorDetection() {
     int sumR = 0, sumG = 0, sumB = 0, n = 0;
 
@@ -298,6 +327,11 @@ void getOutliers(PointCloud<PointType>::Ptr cloud_in, vector<int> inliers, Point
     ei.filter(*cloud_out);
 }
 
+
+// This is the segmentation for the second plane in the box
+// It does a ransac on the outliers of the first plane detection
+// Finally, it checks if the first plane and the second plane are
+// perpendicular. (the scalar product should be close to 0)
 bool planSegmentation() {
     // Plan segmentation (ax + by + cz = 0)
     copyPointCloud(*cloud_outliers, *cloud_segmented);
@@ -357,6 +391,7 @@ bool planSegmentation() {
 
 typedef PointXYZRGB PointType;
 
+// UNUSED: ignore this function
 boost::shared_ptr<pcl::visualization::PCLVisualizer> simpleVis(
         pcl::PointCloud<PointType>::ConstPtr cloud) {
     // -----Open 3D viewer and add point cloud-----
@@ -372,6 +407,7 @@ boost::shared_ptr<pcl::visualization::PCLVisualizer> simpleVis(
     viewer->initCameraParameters();
     return (viewer);
 }
+
 
 string shapeTypeToString(ShapeType type)
 {
@@ -396,6 +432,12 @@ string shapeTypeToString(ShapeType type)
     }
 }
 
+// Finds the best fit for the current object:
+// Is it a:
+//- sphere
+//- plane
+//- cylinder
+//- 2 perpendicular planes
 Shape detectShape() {
     Shape res;
 
@@ -439,6 +481,10 @@ Shape detectShape() {
     return res;
 }
 
+// Removes the ground if it is detected.
+// If the ransac plane does not have a vertical normal,
+// it does nothing.
+
 // input: cloud_filtered
 // output: cloud_without_ground, ground_coefficients
 void findGround()
@@ -462,19 +508,27 @@ void findGround()
     }
 }
 
+// For sorting the objects (index box_1, box_2, ...)
 bool cmpByX(const Shape& s1, const Shape& s2) {
     return s1.center.x < s2.center.x;
 }
 
+// Viewer for the detection output
 boost::shared_ptr<pcl::visualization::PCLVisualizer> viewer (new pcl::visualization::PCLVisualizer("3D viewer"));
+
+// Viewer for the raw point cloud
 boost::shared_ptr<pcl::visualization::PCLVisualizer> viewer_raw (new pcl::visualization::PCLVisualizer("Raw"));
-// input: cloud_without_ground
+
+// The last known location of the object
 PointXYZ last_location;
 
+// Computes the distance between two points (required for tracking the
+// object after giving the command)
 double distance_xyz(PointXYZ p1, PointXYZ p2) {
     return sqrt((p1.x - p2.x) * (p1.x - p2.x) + (p1.y - p2.y) * (p1.y - p2.y) + (p1.z - p2.z) * (p1.z - p2.z));
 }
 
+// Checks if the current cluster (object) is the tracked object.
 double MAX_DISTANCE = 0.3;
 ShapeType checkOurObject(PointXYZ center) {
     if (distance_xyz(last_location, center) < MAX_DISTANCE) {
@@ -485,6 +539,9 @@ ShapeType checkOurObject(PointXYZ center) {
     }
 }
 
+// Divides the points into objects (with euclidian clustering)
+// Also processes each cluster (detection and center computation)
+// input: cloud_without_ground
 void euclidianClustering() {
     pcl::search::KdTree<PointType>::Ptr tree(
             new pcl::search::KdTree<PointType>);
@@ -614,6 +671,7 @@ void euclidianClustering() {
     viewer->spinOnce(100);
 }
 
+// Called by ros for input
 void cloud_cb(
         const boost::shared_ptr<const sensor_msgs::PointCloud2>& cloud_msg) {
     clock_t start_time = clock();
