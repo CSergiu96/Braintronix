@@ -52,7 +52,6 @@ typedef struct {
 
 //------------------------------
 //----Global variables----------
-//----This is a new architectural pattern, called make everything global
 //------------------------------
 typedef PointXYZRGB PointType;
 
@@ -71,10 +70,10 @@ PointCloud<PointType>::Ptr cloud_without_ground(new PointCloud<PointType>);
 // The current cluster (the object that is going to be detected)
 PointCloud<PointType>::Ptr cloud_object(new PointCloud<PointType>);
 
-// TODO !Deprecated: cloud after ransac filtering (the inliers)
+// TODO: no longer used. Cloud after ransac filtering (the inliers)
 pcl::PointCloud<PointType>::Ptr cloud_ransac(new PointCloud<PointType>);
 
-// TODO !Deprecated: cloud after ransac filtering x 2 (in case of 2-plane box)
+// TODO: no longer used. cloud after ransac filtering x 2 (in case of 2-plane box)
 pcl::PointCloud<PointXYZ>::Ptr cloud_final(new PointCloud<PointXYZ>());
 
 //plan segmentation - get a,b,c,d (ax + by +cz + d = 0 )
