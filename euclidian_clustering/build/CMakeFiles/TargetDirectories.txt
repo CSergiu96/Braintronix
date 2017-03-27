@@ -1,3 +1,0 @@
-/home/sergiu/Documents/euclidian_clustering/build/CMakeFiles/edit_cache.dir
-/home/sergiu/Documents/euclidian_clustering/build/CMakeFiles/rebuild_cache.dir
-/home/sergiu/Documents/euclidian_clustering/build/CMakeFiles/e-cluster.dir
